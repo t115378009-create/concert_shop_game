@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>演唱會周邊商店排程規劃小遊戲 </title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Alpine.js CDN for Reactive State Management -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    /* Custom scrollbar for game log */
+    .log-scroll::-webkit-scrollbar {
+      width: 6px;
+    }
+    .log-scroll::-webkit-scrollbar-track {
+      background: #1f2937;
+    }
+    .log-scroll::-webkit-scrollbar-thumb {
+      background: #4b5563;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans min-h-screen flex flex-col" x-data="gameApp()" x-init="initGame()">
+
+  <!-- Top Navigation / Header -->
+  <header class="bg-gray-800 border-b border-gray-700 px-4 py-3 sticky top-0 z-20 shadow-lg">
+    <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-4">
+      <div class="flex items-center space-x-3">
+        <span class="text-2xl"></span>
+        <h1 class="text-xl font-bold tracking-wide text-amber-400">演唱會周邊商店總指揮 </h1>
+      </div>
+      <div class="flex items-center space-x-4">
+        <div class="bg-gray-900 px-3 py-1.5 rounded-lg border border-gray-700 flex items-center space-x-2">
+          <span class="text-gray-400 text-xs font-semibold uppercase">遊戲時間</span>
+          <span class="text-2xl font-black text-emerald-400 font-mono" x-text="formatTime(currentTime)"></span>
+        </div>
+        <button 
+          @click="togglePause()" 
+          x-show="gameState === 'running'"
+          class="px-3 py-1.5 rounded font-semibold text-sm transition-colors"
+          :class="isPaused ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-amber-600 hover:bg-amber-500 text-white'">
+          <span x-text="isPaused ? '▶ 繼續' : '⏸ 暫停'"></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Game Container -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <!-- Left Column: Top Dashboard & Control Panels (Span 2) -->
+    <div class="lg:col-span-2 space-y-6">
+
+      <!-- Top Dashboard Grid -->
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <!-- 資金與營業額 -->
+        <div class="bg-gray-800 p-4 rounded-xl border border-emerald-500/40 shadow-md">
+          <div class="text-xs text-gray-400 font-medium mb-1"> 剩餘資金 (初始 $50,000)</div>
+          <div class="text-2xl font-black text-emerald-400 font-mono" x-text="'$' + money.toLocaleString()"></div>
+          <div class="text-xs text-gray-400 mt-1 flex flex-col gap-0.5">
+            <div>累積營收: <span class="text-amber-300 font-semibold" x-text="'$' + totalRevenue.toLocaleString()"></span></div>
+            <div>歷史最高: <span class="text-purple-400 font-bold font-mono" x-text="'$' + highestRevenue.toLocaleString()"></span></div>
+          </div>
+        </div>
+
+        <!-- 歌迷滿意度 -->
+        <div class="bg-gray-800 p-4 rounded-xl border border-blue-500/40 shadow-md">
+          <div class="flex justify-between text-xs text-gray-400 font-medium mb-1">
+            <span> 歌迷滿意度</span>
+            <span class="font-bold font-mono text-base" :class="satisfaction < 30 ? 'text-red-400' : 'text-blue-400'" x-text="satisfaction + '%'"></span>
+          </div>
+          <div class="w-full bg-gray-700 h-3 rounded-full overflow-hidden mt-2">
+            <div class="h-full transition-all duration-300" 
+                 :class="satisfaction > 50 ? 'bg-emerald-500' : (satisfaction > 20 ? 'bg-amber-500' : 'bg-red-500')"
+                 :style="'width: ' + Math.max(0, satisfaction) + '%'"></div>
+          </div>
+          <div class="text-[10px] text-gray-400 mt-1">歸零觸發歌迷暴動 (Game Over)</div>
+        </div>
+
+        <!-- 員工壓力值 -->
+        <div class="bg-gray-800 p-4 rounded-xl border border-amber-500/40 shadow-md col-span-2 md:col-span-1">
+          <div class="flex justify-between text-xs text-gray-400 font-medium mb-1">
+            <span> 員工壓力指數</span>
+            <span class="font-bold font-mono text-base" :class="employeeStress > 80 ? 'text-red-400' : 'text-amber-400'" x-text="employeeStress + '%'"></span>
+          </div>
+          <div class="w-full bg-gray-700 h-3 rounded-full overflow-hidden mt-2">
+            <div class="h-full transition-all duration-300" 
+                 :class="employeeStress < 50 ? 'bg-emerald-500' : (employeeStress < 80 ? 'bg-amber-500' : 'bg-red-500')"
+                 :style="'width: ' + Math.min(100, employeeStress) + '%'"></div>
+          </div>
+          <div class="text-[10px] text-gray-400 mt-1">達 100% 員工離職罷工 (Game Over)</div>
+        </div>
+      </div>
+
+      <!-- 可愛彩色小人動態視覺模擬畫布 (左上角入口 ➔ 畫面最右邊櫃檯結帳 ➔ 出口離場) -->
+      <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-md space-y-2">
+        <div class="flex justify-between items-center text-xs text-gray-300">
+          <span class="font-bold text-amber-400 flex items-center gap-1.5">
+            <span></span> 現場實境動態模擬 (↖️左上角入口 ➔ S型隊伍 ➔ 右側櫃檯結帳 ➔ ↘️出口離場)
+          </span>
+          <span class="text-gray-400">排隊人數: <strong class="text-blue-400 font-mono" x-text="queueCount + ' 人'"></strong> (🟢良好 🟡躁動 🔴憤怒)</span>
+        </div>
+
+        <div class="relative w-full bg-gray-950 rounded-lg overflow-hidden border border-gray-800 h-64">
+          <canvas id="simCanvas" class="w-full h-full block"></canvas>
+        </div>
+      </div>
+
+      <!-- 人力與櫃檯資訊 -->
+      <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-md space-y-3">
+        <div class="flex justify-between items-center border-b border-gray-700 pb-2">
+          <h2 class="text-sm font-bold text-amber-400 flex items-center gap-1.5">
+            </span> 人力自動排定配置
+          </h2>
+          <span class="text-xs text-gray-400">總員工數: <strong class="text-emerald-400 font-mono" x-text="totalStaff"></strong> 人</span>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3 text-xs">
+          <div class="bg-gray-900/60 p-2.5 rounded border border-gray-700">
+            <div class="text-gray-400"> 結帳專員</div>
+            <div class="text-lg font-bold text-emerald-400 font-mono" x-text="staffRoles.checkout + ' 人'"></div>
+            <div class="text-[10px] text-gray-500 mt-0.5" x-text="'櫃檯: ' + registers + ' 個'"></div>
+          </div>
+          <div class="bg-gray-900/60 p-2.5 rounded border border-gray-700">
+            <div class="text-gray-400"> 現場引導</div>
+            <div class="text-lg font-bold text-blue-400 font-mono" x-text="staffRoles.guide + ' 人'"></div>
+            <div class="text-[10px] text-gray-500 mt-0.5">自動減緩擁擠扣分</div>
+          </div>
+          <div class="bg-gray-900/60 p-2.5 rounded border border-gray-700">
+            <div class="text-gray-400"> 機動 / 補貨</div>
+            <div class="text-lg font-bold text-amber-400 font-mono" x-text="staffRoles.runner + ' 人'"></div>
+            <div class="text-[10px] text-gray-500 mt-0.5">執行搬貨與危機處理</div>
+          </div>
+        </div>
+
+        <!-- 臨時加開按鈕 -->
+        <div class="pt-2 border-t border-gray-700 flex gap-3">
+          <button @click="buyRegister()" class="flex-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 py-1.5 px-3 rounded text-xs font-semibold flex items-center justify-center space-x-1">
+            <span> 臨時加開結帳櫃檯</span>
+            <span class="text-amber-300 font-mono">($4,000)</span>
+          </button>
+          <button @click="hireStaff()" class="flex-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 py-1.5 px-3 rounded text-xs font-semibold flex items-center justify-center space-x-1">
+            <span> 臨時招聘員工</span>
+            <span class="text-amber-300 font-mono">($2,500)</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 商品庫存與補貨面板 -->
+      <div class="bg-gray-800 p-5 rounded-xl border border-gray-700 shadow-md space-y-4">
+        <h2 class="text-lg font-bold text-amber-400 flex items-center gap-2 border-b border-gray-700 pb-3">
+          <span> </span> 周邊商品庫存與補貨管理
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <template x-for="(item, key) in inventory" :key="key">
+            <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700 flex flex-col justify-between">
+              <div>
+                <div class="flex justify-between items-center mb-1">
+                  <span class="font-bold text-gray-200" x-text="item.name"></span>
+                  <span class="text-xs text-amber-400 font-mono" x-text="'$' + item.price"></span>
+                </div>
+                <div class="space-y-1 my-2 text-xs">
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">前台架上:</span>
+                    <span class="font-bold font-mono" :class="item.front === 0 ? 'text-red-400 animate-pulse' : 'text-emerald-400'" x-text="item.front + ' 件'"></span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">後台倉庫:</span>
+                    <span class="font-bold font-mono text-gray-300" x-text="item.back + ' 件'"></span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 階梯式補貨按鈕 -->
+              <div class="space-y-1.5 pt-2 border-t border-gray-800">
+                <template x-if="item.back > 0">
+                  <button 
+                    @click="restockLocal(key)" 
+                    :disabled="staffRoles.runner <= 0"
+                    class="w-full bg-emerald-700 hover:bg-emerald-600 disabled:bg-gray-800 disabled:text-gray-600 text-white text-xs py-1.5 rounded transition font-semibold">
+                    倉庫搬貨 (+100件/0.5h)
+                  </button>
+                </template>
+                <template x-if="item.back <= 0">
+                  <button 
+                    @click="restockRemote(key)" 
+                    :disabled="staffRoles.runner <= 0 || money < 2000"
+                    class="w-full bg-blue-700 hover:bg-blue-600 disabled:bg-gray-800 disabled:text-gray-600 text-white text-xs py-1.5 rounded transition font-semibold">
+                    遠端叫貨 ($2,000/運300件)
+                  </button>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right Column: Activity Log & Informational Box -->
+    <div class="space-y-6">
+
+      <!-- 營運動態日誌 -->
+      <div class="bg-gray-800 p-5 rounded-xl border border-gray-700 shadow-md flex flex-col h-[600px]">
+        <h2 class="text-lg font-bold text-amber-400 border-b border-gray-700 pb-3 flex items-center justify-between">
+          <span> 現場營運動態日誌</span>
+          <span class="text-xs text-gray-400 font-normal">自動即時更新</span>
+        </h2>
+        <div class="flex-1 overflow-y-auto mt-3 space-y-2 pr-1 log-scroll" id="logContainer">
+          <template x-for="(log, index) in logs" :key="index">
+            <div class="text-xs p-2 rounded bg-gray-900/80 border-l-2" 
+                 :class="{
+                   'border-emerald-500 text-emerald-300': log.type === 'success',
+                   'border-red-500 text-red-300': log.type === 'error',
+                   'border-amber-500 text-amber-300': log.type === 'warning',
+                   'border-blue-500 text-gray-300': log.type === 'info'
+                 }">
+              <span class="text-gray-500 font-mono mr-1" x-text="log.time"></span>
+              <span x-text="log.message"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- 開局說明與小撇步 -->
+      <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 text-xs text-gray-400 space-y-2">
+        <h3 class="font-bold text-gray-200 text-sm"> 總指揮戰術提示</h3>
+        <ul class="list-disc list-inside space-y-1">
+          <li>遊戲每半小時為現實中的 <strong class="text-amber-400">15 秒</strong>。</li>
+          <li>排隊超過 <strong class="text-amber-400">35 人</strong> 時，每 3 秒降低滿意度 10%、壓力+10%、結帳速度-15%！</li>
+          <li>所有開局與營運花費皆會即時從 <strong class="text-emerald-400">資金</strong> 扣除。</li>
+          <li>架上沒貨時每 0.5 秒人潮激增 <strong class="text-red-400">+5%</strong>、滿意度 <strong class="text-red-400">-5%</strong>！</li>
+         </ul>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- Opening Config Modal -->
+  <div x-show="gameState === 'setup'" x-cloak class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div class="bg-gray-800 border border-gray-700 rounded-2xl max-w-lg w-full p-6 space-y-6 shadow-2xl">
+      <div class="text-center space-y-2">
+        <h2 class="text-2xl font-black text-amber-400">周邊商店開幕準備</h2>
+        <p class="text-xs text-gray-400">初始資金為 NT$ 50,000，請規劃開門前要準備的櫃檯與員工數：</p>
+      </div>
+
+      <div class="space-y-4 bg-gray-900/60 p-4 rounded-xl border border-gray-700 text-sm">
+        <div class="flex justify-between items-center">
+          <div>
+            <span class="font-bold text-gray-200">結帳櫃檯設置</span>
+            <div class="text-xs text-gray-400">每個 NT$ 3,000</div>
+          </div>
+          <div class="flex items-center space-x-3">
+            <button @click="setupRegisters = Math.max(1, setupRegisters - 1)" class="w-8 h-8 bg-gray-700 rounded font-bold">-</button>
+            <span class="font-mono text-lg text-amber-400" x-text="setupRegisters"></span>
+            <button @click="setupRegisters++" class="w-8 h-8 bg-gray-700 rounded font-bold">+</button>
+          </div>
+        </div>
+
+        <div class="flex justify-between items-center border-t border-gray-800 pt-3">
+          <div>
+            <span class="font-bold text-gray-200">聘請員工總人數</span>
+            <div class="text-xs text-gray-400">每人日薪 NT$ 1,500</div>
+          </div>
+          <div class="flex items-center space-x-3">
+            <button @click="setupStaff = Math.max(1, setupStaff - 1)" class="w-8 h-8 bg-gray-700 rounded font-bold">-</button>
+            <span class="font-mono text-lg text-emerald-400" x-text="setupStaff"></span>
+            <button @click="setupStaff++" class="w-8 h-8 bg-gray-700 rounded font-bold">+</button>
+          </div>
+        </div>
+
+        <div class="border-t border-gray-800 pt-3 space-y-1 text-xs">
+          <div class="flex justify-between text-gray-400">
+            <span>開局費用支出:</span>
+            <span class="font-bold text-red-400 font-mono" x-text="'-$' + calculateSetupCost().toLocaleString()"></span>
+          </div>
+          <div class="flex justify-between text-gray-200 font-bold">
+            <span>開幕可用剩餘資金:</span>
+            <span class="font-bold text-emerald-400 font-mono" x-text="'$' + (50000 - calculateSetupCost()).toLocaleString()"></span>
+          </div>
+        </div>
+      </div>
+
+      <button @click="confirmSetup()" class="w-full bg-emerald-600 hover:bg-emerald-500 font-bold py-3 rounded-xl transition text-white shadow-lg">
+        確認扣款並開始營業 (09:00)
+      </button>
+    </div>
+  </div>
+
+  <!-- Hourly Random Event Modal -->
+  <div x-show="currentEvent !== null" x-cloak class="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50">
+    <div class="bg-gray-800 border-2 border-amber-500/50 rounded-2xl max-w-xl w-full p-6 space-y-6 shadow-2xl animate-fade-in" x-data>
+      <template x-if="currentEvent">
+        <div class="space-y-4">
+          <div class="flex justify-between items-center border-b border-gray-700 pb-3">
+            <span class="bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs px-2.5 py-1 rounded-full font-mono font-bold" x-text="currentEvent.time + ' 突發事件'"></span>
+            <span class="text-xs text-gray-400">請作出現場指揮決策</span>
+          </div>
+
+          <h3 class="text-xl font-bold text-white" x-text="currentEvent.title"></h3>
+          <p class="text-sm text-gray-300 leading-relaxed bg-gray-900/60 p-3.5 rounded-lg border border-gray-700/80" x-text="currentEvent.desc"></p>
+
+          <div class="space-y-3 pt-2">
+            <template x-for="(opt, idx) in currentEvent.options" :key="idx">
+              <button 
+                @click="chooseEventOption(idx)"
+                class="w-full text-left bg-gray-700/70 hover:bg-gray-600/80 border border-gray-600 hover:border-amber-400 p-3.5 rounded-xl transition flex flex-col space-y-1 group">
+                <div class="font-bold text-sm text-amber-300 group-hover:text-amber-200" x-text="(idx + 1) + '. ' + opt.text"></div>
+                <div class="text-xs text-gray-400" x-text="opt.subtext"></div>
+              </button>
+            </template>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Restock Alert Toast Modal (已被修改：已移除 animate-bounce 動畫類別) -->
+  <div x-show="outOfStockModal.show" x-cloak class="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-40">
+    <div class="bg-gray-800 border-2 border-red-500 rounded-xl p-5 max-w-md w-full text-center space-y-4 shadow-2xl">
+      <div class="text-4xl">🚨</div>
+      <h3 class="text-xl font-bold text-red-400" x-text="outOfStockModal.itemName + ' 架上完全售罄！'"></h3>
+      <p class="text-xs text-gray-300 leading-relaxed">
+        警告！前台商品缺貨中！請立卽安排人員補貨！<br>
+        <strong class="text-amber-400">缺貨狀態下每 0.5 秒排隊人潮 +5%、顧客滿意度 -5%！</strong>
+      </p>
+      <button @click="dismissOutOfStockModal()" class="bg-red-600 hover:bg-red-500 px-5 py-2 rounded-lg text-xs font-bold text-white shadow-lg">
+        知道了，立刻安排補貨
+      </button>
+    </div>
+  </div>
+
+  <!-- Game Over Modal -->
+  <div x-show="gameState === 'gameover'" x-cloak class="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-50">
+    <div class="bg-gray-800 border-2 border-red-600 rounded-2xl max-w-md w-full p-6 text-center space-y-5 shadow-2xl">
+      <div class="text-5xl">💀</div>
+      <h2 class="text-2xl font-black text-red-500">GAME OVER</h2>
+      <p class="text-sm text-gray-300" x-text="gameOverReason"></p>
+
+      <div class="bg-gray-900 p-4 rounded-xl text-left space-y-2 text-xs text-gray-400">
+        <div>最終營業額: <strong class="text-emerald-400 font-mono" x-text="'$' + totalRevenue.toLocaleString()"></strong></div>
+        <div>歷史最高紀錄: <strong class="text-purple-400 font-mono" x-text="'$' + highestRevenue.toLocaleString()"></strong></div>
+        <div>剩餘資金: <strong class="text-amber-400 font-mono" x-text="'$' + money.toLocaleString()"></strong></div>
+        <div>結算滿意度: <strong class="text-blue-400 font-mono" x-text="satisfaction + '%'"></strong></div>
+      </div>
+
+      <button @click="restartGame()" class="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition">
+        重新挑戰營運
+      </button>
+    </div>
+  </div>
+
+  <!-- Game Clear / Ending Modal -->
+  <div x-show="gameState === 'clear'" x-cloak class="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-50">
+    <div class="bg-gray-800 border-2 border-amber-400 rounded-2xl max-w-lg w-full p-6 text-center space-y-5 shadow-2xl">
+      <div class="text-5xl" x-text="endingCard.icon"></div>
+      <div>
+        <span class="text-xs text-amber-400 font-bold tracking-widest uppercase">營運評級結果</span>
+        <h2 class="text-3xl font-black text-amber-300 mt-1" x-text="endingCard.rank + ' - ' + endingCard.title"></h2>
+      </div>
+
+      <p class="text-xs text-gray-300 bg-gray-900/80 p-4 rounded-xl text-left leading-relaxed" x-text="endingCard.desc"></p>
+
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-gray-900 p-3 rounded-xl text-xs">
+        <div>
+          <div class="text-gray-500">總營業額</div>
+          <div class="font-bold text-emerald-400 font-mono" x-text="'$' + totalRevenue.toLocaleString()"></div>
+        </div>
+        <div>
+          <div class="text-gray-500">歷史最高</div>
+          <div class="font-bold text-purple-400 font-mono" x-text="'$' + highestRevenue.toLocaleString()"></div>
+        </div>
+        <div>
+          <div class="text-gray-500">最終滿意度</div>
+          <div class="font-bold text-blue-400 font-mono" x-text="satisfaction + '%'"></div>
+        </div>
+        <div>
+          <div class="text-gray-500">員工壓力</div>
+          <div class="font-bold text-amber-400 font-mono" x-text="employeeStress + '%'"></div>
+        </div>
+      </div>
+
+      <button @click="restartGame()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl transition">
+        再玩一次
+      </button>
+    </div>
+  </div>
+
+  <script>
+    function gameApp() {
+      return {
+        // Game State Variables
+        gameState: 'setup',
+        isPaused: false,
+        currentTime: 540, // 540 = 09:00
+        timer: null,
+        outOfStockTimer: null, 
+        realtimePenaltyTimer: null,
+
+        // Financial & Resources
+        money: 50000,
+        totalRevenue: 0,
+        highestRevenue: parseInt(localStorage.getItem('bigbang_highest_revenue') || '0'), // 讀取歷史最高營業額紀錄
+        satisfaction: 90,
+        employeeStress: 0,
+        queueCount: 80,
+
+        // Setup variables
+        setupRegisters: 3,
+        setupStaff: 6,
+
+        // Active Staff & Roles
+        totalStaff: 6,
+        registers: 3,
+        staffRoles: {
+          checkout: 3,
+          guide: 2,
+          runner: 1
+        },
+
+        // Inventory
+        inventory: {
+          lightstick: { name: '手燈', price: 1500, front: 100, back: 300 },
+          tshirt: { name: 'T恤', price: 2000, front: 200, back: 400 },
+          keychain: { name: '吊飾', price: 750, front: 1500, back: 1500 }
+        },
+
+        // Temporary Buffs/Status Effects
+        efficiencyMultiplier: 1.0,
+        checkoutDelayMultiplier: 1.0,
+        queueRateMultiplier: 1.0,
+        isOvertime: false,
+
+        // UI & Modals
+        logs: [],
+        currentEvent: null,
+        gameOverReason: '',
+        outOfStockModal: { show: false, itemName: '' },
+        lastModalDismissTime: 0,
+        endingCard: { rank: '', title: '', desc: '', icon: '🏆' },
+
+        // Canvas 2D Animated Crowd Objects
+        simDots: [],
+
+        // Event Database (10 Events)
+        events: {
+          '09:00': {
+            time: '09:00',
+            title: '員工遲到與場佈準備',
+            desc: '剛開門進行場佈與進貨時，2 名員工因交通塞車遲到半小時，現場有點混亂！',
+            options: [
+              {
+                text: '現有人力高強度場佈',
+                subtext: '不花錢，效率 -20%，員工壓力 +15%',
+                action: (game) => {
+                  game.efficiencyMultiplier = 0.8;
+                  game.employeeStress = Math.min(100, game.employeeStress + 15);
+                  game.addLog('警告', '高強度場佈導致員工壓力增加。', 'warning');
+                }
+              },
+              {
+                text: '招聘 1 名臨時工',
+                subtext: '扣款 $2,500 (薪水 $1,500 + 懲罰 $1,000)，員工壓力 -5%',
+                action: (game) => {
+                  game.money -= 2500;
+                  game.totalStaff += 1;
+                  game.autoAssignStaffRoles();
+                  game.employeeStress = Math.max(0, game.employeeStress - 5);
+                  game.addLog('成功', '扣除 $2,500 成功緊急聘請 1 名臨時工支援。', 'success');
+                }
+              },
+              {
+                text: '延後 15 分鐘開放隊伍',
+                subtext: '確保場佈完成，但歌迷滿意度 -10%',
+                action: (game) => {
+                  game.satisfaction -= 10;
+                  game.addLog('警告', '延後開放隊伍引發歌迷不滿。', 'warning');
+                }
+              }
+            ]
+          },
+          '10:00': {
+            time: '10:00',
+            title: '黃牛隊伍解壓縮事件',
+            desc: '排隊區發現有黃牛團體強行解壓縮插隊，現場歌迷開始躁動！',
+            options: [
+              {
+                text: '派 2 名動線引導員強行處置',
+                subtext: '成功驅離，歌迷滿意度 +5%',
+                action: (game) => {
+                  game.satisfaction = Math.min(100, game.satisfaction + 5);
+                  game.addLog('成功', '動線引導員成功處理黃牛插隊。', 'success');
+                }
+              },
+              {
+                text: '急件調派人員拉設紅欄杆',
+                subtext: '扣款 $5,000 封閉死角，滿意度 +15%、壓力 +5%',
+                action: (game) => {
+                  game.money -= 5000;
+                  game.satisfaction = Math.min(100, game.satisfaction + 15);
+                  game.employeeStress = Math.min(100, game.employeeStress + 5);
+                  game.addLog('成功', '扣除 $5,000 加設紅欄杆有效維護秩序。', 'success');
+                }
+              },
+              {
+                text: '人力不足無視處理',
+                subtext: '黃牛成功插隊，歌迷滿意度 -20%',
+                action: (game) => {
+                  game.satisfaction -= 20;
+                  game.addLog('錯誤', '無視黃牛爆發歌迷怒火。', 'error');
+                }
+              }
+            ]
+          },
+          '11:00': {
+            time: '11:00',
+            title: 'POS 機系統大當機',
+            desc: '現場網路不穩導致所有櫃檯 POS 機斷線無法連線刷卡！',
+            options: [
+              {
+                text: '緊急派工程師修復',
+                subtext: '扣款 $10,000，半小時內修復',
+                action: (game) => {
+                  game.money -= 10000;
+                  game.addLog('成功', '扣款 $10,000 工程師及時修復 POS 機。', 'success');
+                }
+              },
+              {
+                text: '改用人工計算機/手寫結帳',
+                subtext: '結帳速度 -50%，滿意度 -15%',
+                action: (game) => {
+                  game.checkoutDelayMultiplier = 0.5;
+                  game.satisfaction -= 15;
+                  game.addLog('警告', '人工結帳導致結帳速度大減。', 'warning');
+                }
+              },
+              {
+                text: '強行重啟系統 (賭一把)',
+                subtext: '50% 恢復(滿意度+5%)；50% 損壞改現金(滿意度-15%、壓力+10%)',
+                action: (game) => {
+                  if (Math.random() < 0.5) {
+                    game.satisfaction = Math.min(100, game.satisfaction + 5);
+                    game.addLog('成功', '重啟成功！系統恢復正常。', 'success');
+                  } else {
+                    game.satisfaction -= 15;
+                    game.employeeStress = Math.min(100, game.employeeStress + 10);
+                    game.addLog('錯誤', '重啟失敗改現金結帳，滿意度下降！', 'error');
+                  }
+                }
+              }
+            ]
+          },
+          '12:00': {
+            time: '12:00',
+            title: '午餐輪休與午間人潮高峰',
+            desc: '正值中午員工用餐時間，附近用餐完畢的粉絲大幅湧入排隊區！',
+            options: [
+              {
+                text: '發放便當與加班費 (全員不休)',
+                subtext: '扣款 $5,000，滿意度 +10%、壓力 +10%',
+                action: (game) => {
+                  game.money -= 5000;
+                  game.satisfaction = Math.min(100, game.satisfaction + 10);
+                  game.employeeStress = Math.min(100, game.employeeStress + 10);
+                  game.addLog('資訊', '扣款 $5,000 全力運作順利消化午間人潮。', 'info');
+                }
+              },
+              {
+                text: '分兩批輪流用餐',
+                subtext: '人力效果 -30%，壓力 -15%、滿意度 -5%',
+                action: (game) => {
+                  game.efficiencyMultiplier = 0.7;
+                  game.employeeStress = Math.max(0, game.employeeStress - 15);
+                  game.satisfaction -= 5;
+                  game.addLog('資訊', '員工分批用餐，體力得到恢復。', 'info');
+                }
+              },
+              {
+                text: '直接關閉店鋪 1 小時',
+                subtext: '滿意度 -15%、壓力 -20%',
+                action: (game) => {
+                  game.satisfaction -= 15;
+                  game.employeeStress = Math.max(0, game.employeeStress - 20);
+                  game.efficiencyMultiplier = 0;
+                  game.addLog('警告', '關店休息引起排隊區一片罵聲。', 'warning');
+                }
+              }
+            ]
+          },
+          '13:00': {
+            time: '13:00',
+            title: '工讀生找錯錢 / 拿錯尺寸',
+            desc: '因高強度結帳發生數起尺寸拿錯與找錯錢事件，歌迷折返回櫃檯理論堵住出口！',
+            options: [
+              {
+                text: '設立獨立退換貨與客訴站',
+                subtext: '扣款 $5,000，滿意度 +15%',
+                action: (game) => {
+                  game.money -= 5000;
+                  game.satisfaction = Math.min(100, game.satisfaction + 15);
+                  game.addLog('成功', '扣款 $5,000 獨立退換貨站有效紓解壓力。', 'success');
+                }
+              },
+              {
+                text: '導入雙人交叉檢查',
+                subtext: '結帳時間 +35%、壓力 +10%、滿意度 -15%',
+                action: (game) => {
+                  game.checkoutDelayMultiplier = 0.65;
+                  game.employeeStress = Math.min(100, game.employeeStress + 10);
+                  game.satisfaction -= 15;
+                  game.addLog('警告', '雙人檢查拉長了結帳時間。', 'warning');
+                }
+              },
+              {
+                text: '讓櫃檯人員停下處置',
+                subtext: '櫃檯癱瘓 10 分鐘，隊伍回堵，滿意度 -10%、壓力 +5%',
+                action: (game) => {
+                  game.satisfaction -= 10;
+                  game.employeeStress = Math.min(100, game.employeeStress + 5);
+                  game.addLog('錯誤', '櫃檯暫停處置造成現場回堵。', 'error');
+                }
+              }
+            ]
+          },
+          '14:00': {
+            time: '14:00',
+            title: '天氣酷熱，排隊區粉絲中暑',
+            desc: '午後高溫酷熱，排隊區有歌迷體力不支暈倒！',
+            options: [
+              {
+                text: '派機動人員協助並發送冰水',
+                subtext: '扣款 $2,000 水資，滿意度 +15%',
+                action: (game) => {
+                  game.money -= 2000;
+                  game.satisfaction = Math.min(100, game.satisfaction + 15);
+                  game.addLog('成功', '扣款 $2,000 發送冰水獲得公關好評！', 'success');
+                }
+              },
+              {
+                text: '協助叫救護車維護動線',
+                subtext: '壓力 +5%',
+                action: (game) => {
+                  game.employeeStress = Math.min(100, game.employeeStress + 5);
+                  game.addLog('資訊', '救護車已將中暑歌迷送醫。', 'info');
+                }
+              },
+              {
+                text: '忽視情況繼續販售',
+                subtext: '滿意度 -25%，且 30% 機率爆發踩踏 Game Over',
+                action: (game) => {
+                  game.satisfaction -= 25;
+                  if (Math.random() < 0.3) {
+                    game.triggerGameOver('排隊區爆發重大推擠與踩踏安全事故！');
+                  } else {
+                    game.addLog('錯誤', '忽視中暑引發現場強烈不滿。', 'error');
+                  }
+                }
+              }
+            ]
+          },
+          '15:00': {
+            time: '15:00',
+            title: '發現批次瑕疵品 (手燈有污漬)',
+            desc: '開箱發現有一批手燈表面有污漬，且已有 50 件瑕疵品流出！',
+            options: [
+              {
+                text: '全面回收暫停販售並退換貨',
+                subtext: '扣款補償 $75,000，壓力 +5%',
+                action: (game) => {
+                  game.money -= 75000;
+                  game.employeeStress = Math.min(100, game.employeeStress + 5);
+                  game.addLog('資訊', '扣款 $75,000 負責任地全面回收瑕疵手燈。', 'info');
+                }
+              },
+              {
+                text: '宣佈限量版打九折',
+                subtext: '扣款成本 $7,500，滿意度 -5%',
+                action: (game) => {
+                  game.money -= 7500;
+                  game.satisfaction -= 5;
+                  game.addLog('警告', '打折促銷瑕疵品引起少數歌迷質疑。', 'warning');
+                }
+              },
+              {
+                text: '裝作沒看見，繼續原價販售',
+                subtext: '被歌迷發現爆料，滿意度 -15%',
+                action: (game) => {
+                  game.satisfaction -= 15;
+                  game.addLog('錯誤', '瑕疵品爆料在網路發酵！', 'error');
+                }
+              }
+            ]
+          },
+          '16:00': {
+            time: '16:00',
+            title: '歌迷地攤佔用官方排隊動線',
+            desc: '發放自製應援物吸引數百人圍觀，將官方隊伍入口完全堵死！',
+            options: [
+              {
+                text: '劃定「應援物專用發放特區」',
+                subtext: '扣款 $10,000，滿意度 +15%',
+                action: (game) => {
+                  game.money -= 10000;
+                  game.satisfaction = Math.min(100, game.satisfaction + 15);
+                  game.addLog('成功', '扣款 $10,000 劃定特區完美解決入口堵塞。', 'success');
+                }
+              },
+              {
+                text: '保全強制驅離清理地攤',
+                subtext: '滿意度 -15%',
+                action: (game) => {
+                  game.satisfaction -= 15;
+                  game.addLog('警告', '強制驅離引發粉絲抗議執法過當。', 'warning');
+                }
+              },
+              {
+                text: '任由應援攤位繼續圍觀',
+                subtext: '隊伍移動速度 -50%，滿意度 -15%',
+                action: (game) => {
+                  game.queueRateMultiplier = 0.5;
+                  game.satisfaction -= 15;
+                  game.addLog('錯誤', '入口嚴重堵塞，人潮無法進場。', 'error');
+                }
+              }
+            ]
+          },
+          '17:00': {
+            time: '17:00',
+            title: '關櫃倒數半小時，人潮壓線回堵',
+            desc: '距離關櫃僅剩半小時，現場仍有數百名 VIP 歌迷壓線排隊！',
+            options: [
+              {
+                text: '臨時加開櫃檯與聘請臨時工',
+                subtext: '扣款 $50,000，滿意度 +15%、壓力 -10%',
+                action: (game) => {
+                  game.money -= 50000;
+                  game.registers += 1;
+                  game.totalStaff += 1;
+                  game.autoAssignStaffRoles();
+                  game.satisfaction = Math.min(100, game.satisfaction + 15);
+                  game.employeeStress = Math.max(0, game.employeeStress - 10);
+                  game.addLog('成功', '扣款 $50,000 加開櫃檯全力消化壓線人潮。', 'success');
+                }
+              },
+              {
+                text: '全員引導員安撫並截斷隊伍',
+                subtext: '滿意度 -8%',
+                action: (game) => {
+                  game.satisfaction -= 8;
+                  game.addLog('警告', '強制截斷隊伍引發隊尾歌迷抗議。', 'warning');
+                }
+              },
+              {
+                text: '放任人潮擠爆結帳區',
+                subtext: '排隊超過 35 人時，滿意度持續扣減',
+                action: (game) => {
+                  game.addLog('錯誤', '放任擁擠導致排隊體驗極差。', 'error');
+                }
+              }
+            ]
+          },
+          '17:30': {
+            time: '17:30',
+            title: '17:30 終極關櫃抉擇 (最終事件)',
+            desc: '已到原定關櫃時間！現場仍有上百名歌迷未結帳。',
+            options: [
+              {
+                text: '準時 17:30 強制關櫃',
+                subtext: '滿意度 -30%、壓力 -10%',
+                action: (game) => {
+                  game.satisfaction -= 30;
+                  game.employeeStress = Math.max(0, game.employeeStress - 10);
+                  game.addLog('錯誤', '準時關櫃引發歌迷強烈怒火！', 'error');
+                  game.finishGame();
+                }
+              },
+              {
+                text: '宣佈延長販售時間至 18:30',
+                subtext: '扣款全體加班費 $10,000，滿意度 +15%、壓力 +15%',
+                action: (game) => {
+                  game.money -= 10000;
+                  game.satisfaction = Math.min(100, game.satisfaction + 15);
+                  game.employeeStress = Math.min(100, game.employeeStress + 15);
+                  game.isOvertime = true;
+                  game.addLog('成功', '扣款 $10,000 延長營運獲良心主辦好評！', 'success');
+                  game.finishGame();
+                }
+              },
+              {
+                text: '僅開放單一品項快速結帳通道',
+                subtext: '滿意度 -5%',
+                action: (game) => {
+                  game.satisfaction -= 5;
+                  game.addLog('資訊', '單一通道快速結帳順利清空人潮。', 'info');
+                  game.finishGame();
+                }
+              }
+            ]
+          }
+        },
+
+        calculateSetupCost() {
+          return (this.setupRegisters * 3000) + (this.setupStaff * 1500);
+        },
+
+        initGame() {
+          this.addLog('系統', '歡迎來到周邊商店總指揮控制台 (v3.0)。', 'info');
+        },
+
+        confirmSetup() {
+          const cost = this.calculateSetupCost();
+          this.money = 50000 - cost;
+          this.registers = this.setupRegisters;
+          this.totalStaff = this.setupStaff;
+
+          this.autoAssignStaffRoles();
+
+          this.gameState = 'running';
+          this.addLog('開幕', `商店 09:00 正式營業！成功扣款開局準備金 $${cost.toLocaleString()}，剩餘資金 $${this.money.toLocaleString()}。`, 'success');
+
+          this.initCanvasAnimation();
+          this.startOutOfStockCheckLoop();
+          this.startRealtimePenaltyLoop();
+          this.checkEvent();
+          this.startTimer();
+        },
+
+        autoAssignStaffRoles() {
+          const checkoutCount = Math.min(this.registers, this.totalStaff);
+          const remaining = this.totalStaff - checkoutCount;
+          const guideCount = Math.floor(remaining / 2);
+          const runnerCount = remaining - guideCount;
+
+          this.staffRoles = {
+            checkout: checkoutCount,
+            guide: guideCount,
+            runner: runnerCount
+          };
+        },
+
+        startTimer() {
+          if (this.timer) clearInterval(this.timer);
+          this.timer = setInterval(() => {
+            if (this.gameState === 'running' && !this.isPaused && this.currentEvent === null) {
+              this.tick();
+            }
+          }, 15000);
+        },
+
+        dismissOutOfStockModal() {
+          this.outOfStockModal.show = false;
+          this.lastModalDismissTime = Date.now();
+        },
+
+        startOutOfStockCheckLoop() {
+          if (this.outOfStockTimer) clearInterval(this.outOfStockTimer);
+          this.outOfStockTimer = setInterval(() => {
+            if (this.gameState === 'running' && !this.isPaused) {
+              let isAnyFrontEmpty = false;
+              let emptyItemName = '';
+
+              Object.keys(this.inventory).forEach(key => {
+                if (this.inventory[key].front === 0) {
+                  isAnyFrontEmpty = true;
+                  emptyItemName = this.inventory[key].name;
+                }
+              });
+
+              if (isAnyFrontEmpty) {
+                this.queueCount = Math.floor(this.queueCount * 1.05);
+                this.satisfaction = Math.max(0, this.satisfaction - 5);
+
+                const now = Date.now();
+                if (!this.outOfStockModal.show && (now - this.lastModalDismissTime >= 5000)) {
+                  this.outOfStockModal.itemName = emptyItemName;
+                  this.outOfStockModal.show = true;
+                }
+
+                this.checkFailConditions();
+              }
+            }
+          }, 500);
+        },
+
+        startRealtimePenaltyLoop() {
+          if (this.realtimePenaltyTimer) clearInterval(this.realtimePenaltyTimer);
+          this.realtimePenaltyTimer = setInterval(() => {
+            if (this.gameState === 'running' && !this.isPaused) {
+              if (this.queueCount > 35) {
+                this.satisfaction = Math.max(0, this.satisfaction - 10);
+                this.employeeStress = Math.min(100, this.employeeStress + 10);
+                this.checkoutDelayMultiplier = Math.max(0.1, this.checkoutDelayMultiplier - 0.15);
+
+                this.addLog('警告', `排隊爆滿(${this.queueCount}人)！每3秒滿意度-10%、壓力+10%、結帳速度-15%！`, 'error');
+
+                this.checkFailConditions();
+              }
+            }
+          }, 3000);
+        },
+
+        togglePause() {
+          this.isPaused = !this.isPaused;
+        },
+
+        tick() {
+          this.currentTime += 30;
+
+          this.efficiencyMultiplier = 1.0;
+          this.checkoutDelayMultiplier = 1.0;
+          this.queueRateMultiplier = 1.0;
+
+          this.processSalesAndQueue();
+
+          if (this.checkFailConditions()) return;
+
+          this.checkEvent();
+        },
+
+        // 更新營收並同步更新最高營業額紀錄
+        updateRevenue(amount) {
+          this.totalRevenue += amount;
+          if (this.totalRevenue > this.highestRevenue) {
+            this.highestRevenue = this.totalRevenue;
+            localStorage.setItem('bigbang_highest_revenue', this.highestRevenue.toString());
+          }
+        },
+
+        processSalesAndQueue() {
+          let newCustomers = Math.floor((Math.random() * 30 + 30) * this.queueRateMultiplier);
+          if (this.currentTime >= 960) {
+            newCustomers += 40;
+          }
+          this.queueCount += newCustomers;
+
+          const activeCabinets = Math.min(this.registers, this.staffRoles.checkout);
+          const processedCap = Math.floor(activeCabinets * 30 * this.efficiencyMultiplier * this.checkoutDelayMultiplier);
+          const actualProcessed = Math.min(this.queueCount, processedCap);
+
+          if (actualProcessed > 0) {
+            let periodRevenue = 0;
+
+            for (let i = 0; i < actualProcessed; i++) {
+              const buyItems = this.getRandomItemsToBuy();
+              buyItems.forEach(itemKey => {
+                const item = this.inventory[itemKey];
+
+                if (item.front > 0) {
+                  item.front--;
+                  periodRevenue += item.price;
+                } else if (item.back > 0) {
+                  item.back--;
+                  periodRevenue += item.price;
+                } else {
+                  this.satisfaction = Math.max(0, this.satisfaction - 0.5);
+                }
+              });
+            }
+
+            this.money += periodRevenue;
+            this.updateRevenue(periodRevenue);
+            this.queueCount -= actualProcessed;
+
+            this.addLog('營業', `完成 ${actualProcessed} 人結帳，進帳 $${periodRevenue.toLocaleString()}。`, 'info');
+          }
+        },
+
+        getRandomItemsToBuy() {
+          const weightedPool = [
+            'lightstick', 'lightstick', 
+            'tshirt', 'tshirt', 
+            'keychain', 'keychain', 'keychain', 'keychain'
+          ];
+          const count = Math.floor(Math.random() * 3) + 1;
+          const selected = [];
+          for (let i = 0; i < count; i++) {
+            selected.push(weightedPool[Math.floor(Math.random() * weightedPool.length)]);
+          }
+          return selected;
+        },
+
+        buyRegister() {
+          const cost = 4000;
+          if (this.money >= cost) {
+            this.money -= cost;
+            this.registers++;
+            this.autoAssignStaffRoles();
+            this.addLog('成功', '扣款 $4,000 成功臨時加開 1 個結帳櫃檯。', 'success');
+          } else {
+            this.addLog('錯誤', '資金不足 $4,000 以加開櫃檯！', 'error');
+          }
+        },
+
+        hireStaff() {
+          const cost = 2500;
+          if (this.money >= cost) {
+            this.money -= cost;
+            this.totalStaff++;
+            this.autoAssignStaffRoles();
+            this.employeeStress = Math.max(0, this.employeeStress - 5);
+            this.addLog('成功', '扣款 $2,500 成功臨時招聘 1 名員工。', 'success');
+          } else {
+            this.addLog('錯誤', '資金不足 $2,500 以招聘員工！', 'error');
+          }
+        },
+
+        restockLocal(itemKey) {
+          const item = this.inventory[itemKey];
+          if (this.staffRoles.runner <= 0) {
+            this.addLog('錯誤', '無可用機動人員去倉庫搬貨！', 'error');
+            return;
+          }
+          if (item.back <= 0) {
+            this.addLog('警告', '後台倉庫已無存貨，請使用遠端叫貨！', 'warning');
+            return;
+          }
+
+          const amount = Math.min(100, item.back);
+          item.back -= amount;
+          item.front += amount;
+          this.addLog('補貨', `指派機動人員成功從倉庫搬運 ${item.name} ${amount} 件至前台。`, 'success');
+        },
+
+        restockRemote(itemKey) {
+          const item = this.inventory[itemKey];
+          const fee = 2000;
+          if (this.staffRoles.runner <= 0) {
+            this.addLog('錯誤', '無可用機動人員處理遠端叫貨！', 'error');
+            return;
+          }
+          if (this.money < fee) {
+            this.addLog('錯誤', '資金不足支付遠端運費 $2,000！', 'error');
+            return;
+          }
+
+          this.money -= fee;
+          item.back += 200;
+          item.front += 100;
+          this.addLog('補貨', `扣款 $2,000 遠端叫貨 ${item.name} 300 件抵達 (100件上架/200件入庫)。`, 'success');
+        },
+
+        checkEvent() {
+          const timeStr = this.formatTime(this.currentTime);
+          if (this.events[timeStr]) {
+            this.currentEvent = this.events[timeStr];
+            this.isPaused = true;
+          }
+        },
+
+        chooseEventOption(index) {
+          if (!this.currentEvent) return;
+          const selectedOption = this.currentEvent.options[index];
+          selectedOption.action(this);
+          this.currentEvent = null;
+          this.isPaused = false;
+        },
+
+        checkFailConditions() {
+          if (this.money < 0) {
+            this.triggerGameOver('資金扣至負數，公司宣告破產！');
+            return true;
+          }
+          if (this.satisfaction <= 0) {
+            this.triggerGameOver('歌迷滿意度降至 0%，現場爆發歌迷暴動！');
+            return true;
+          }
+          if (this.employeeStress >= 100) {
+            this.triggerGameOver('員工壓力達 100%，全體罷工走人！');
+            return true;
+          }
+          return false;
+        },
+
+        triggerGameOver(reason) {
+          this.gameState = 'gameover';
+          this.gameOverReason = reason;
+          this.clearIntervals();
+        },
+
+        finishGame() {
+          this.clearIntervals();
+          this.gameState = 'clear';
+          this.calculateEnding();
+        },
+
+        clearIntervals() {
+          if (this.timer) clearInterval(this.timer);
+          if (this.outOfStockTimer) clearInterval(this.outOfStockTimer);
+          if (this.realtimePenaltyTimer) clearInterval(this.realtimePenaltyTimer);
+        },
+
+        calculateEnding() {
+          const rev = this.totalRevenue;
+          const sat = this.satisfaction;
+
+          if (rev >= 2000000 && sat >= 80) {
+            this.endingCard = {
+              rank: 'S 級',
+              title: '神級營運主辦方',
+              desc: '太強了！你完美平衡了營收與歌迷體驗，兼顧員工福祉！',
+              icon: '🏆'
+            };
+          } else if (rev >= 1500000 && sat >= 60) {
+            this.endingCard = {
+              rank: 'A 級',
+              title: '平穩落幕',
+              desc: '相當成功的營運！順利完成周邊販售，賺取了合理的利潤。',
+              icon: '🥇'
+            };
+          } else if (rev >= 800000 && sat < 40) {
+            this.endingCard = {
+              rank: 'B 級',
+              title: '血汗營運商',
+              desc: '賺到了錢，但動線卡頓與高壓管理讓歌迷抱怨連連。',
+              icon: '🥈'
+            };
+          } else {
+            this.endingCard = {
+              rank: 'C 級',
+              title: '被罵爆的黑心主辦',
+              desc: '現場混亂、歌迷抱怨連連，滿意度極低。',
+              icon: '🥉'
+            };
+          }
+        },
+
+        restartGame() {
+          window.location.reload();
+        },
+
+        formatTime(minutes) {
+          const h = Math.floor(minutes / 60);
+          const m = minutes % 60;
+          return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+        },
+
+        addLog(typeText, message, type = 'info') {
+          const time = this.formatTime(this.currentTime);
+          this.logs.unshift({ time: `[${time}]`, message: `${typeText}: ${message}`, type });
+          if (this.logs.length > 50) this.logs.pop();
+        },
+
+        initCanvasAnimation() {
+          const canvas = document.getElementById('simCanvas');
+          if (!canvas) return;
+          const ctx = canvas.getContext('2d');
+
+          const resizeCanvas = () => {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+          };
+          resizeCanvas();
+          window.addEventListener('resize', resizeCanvas);
+
+          this.simDots = [];
+
+          const animate = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const regCount = Math.max(1, this.registers);
+            const regX = canvas.width - 65;
+            const regYSpacing = canvas.height / (regCount + 1);
+
+            for (let i = 0; i < regCount; i++) {
+              const ry = regYSpacing * (i + 1) - 15;
+              ctx.fillStyle = '#374151';
+              ctx.fillRect(regX, ry, 50, 30);
+              ctx.fillStyle = '#F59E0B';
+              ctx.font = 'bold 10px sans-serif';
+              ctx.fillText(`櫃檯 ${i + 1}`, regX + 8, ry + 18);
+            }
+
+            let dotColor = '#10B981';
+            let showAngry = false;
+            if (this.queueCount > 35) {
+              dotColor = '#EF4444';
+              showAngry = true;
+            } else if (this.queueCount > 20) {
+              dotColor = '#F59E0B';
+            }
+
+            const targetDotCount = Math.min(50, Math.max(12, this.queueCount));
+            while (this.simDots.length < targetDotCount) {
+              this.simDots.push({
+                x: 20,
+                y: 20,
+                state: 'queue',
+                assignedRegister: 0,
+                checkoutTimer: 0
+              });
+            }
+            while (this.simDots.length > targetDotCount) {
+              const normalDots = this.simDots.filter(d => d.state === 'queue');
+              if (normalDots.length > 0) {
+                const idx = this.simDots.indexOf(normalDots[normalDots.length - 1]);
+                this.simDots.splice(idx, 1);
+              } else {
+                break;
+              }
+            }
+
+            this.simDots.forEach((dot, index) => {
+              if (dot.state === 'queue') {
+                const ratio = index / Math.max(1, targetDotCount);
+                const targetX = 30 + ratio * (canvas.width - 120);
+                const targetY = 30 + Math.sin(ratio * Math.PI * 2.5) * (canvas.height * 0.35) + ratio * (canvas.height * 0.4);
+
+                dot.x += (targetX - dot.x) * 0.1;
+                dot.y += (targetY - dot.y) * 0.1;
+
+                if (index < regCount && dot.x > canvas.width - 140) {
+                  dot.state = 'checkout';
+                  dot.assignedRegister = index % regCount;
+                  dot.checkoutTimer = 0;
+                }
+
+                ctx.beginPath();
+                ctx.arc(dot.x, dot.y, 6.5, 0, Math.PI * 2);
+                ctx.fillStyle = dotColor;
+                ctx.fill();
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = '#1F2937';
+                ctx.stroke();
+
+                if (showAngry && index % 2 === 0) {
+                  ctx.fillStyle = '#EF4444';
+                  ctx.font = '11px sans-serif';
+                  ctx.fillText('💢', dot.x - 5, dot.y - 8);
+                }
+              }
+              else if (dot.state === 'checkout') {
+                const ry = regYSpacing * (dot.assignedRegister + 1);
+                const targetX = canvas.width - 80;
+                const targetY = ry;
+
+                dot.x += (targetX - dot.x) * 0.15;
+                dot.y += (targetY - dot.y) * 0.15;
+
+                dot.checkoutTimer++;
+
+                ctx.beginPath();
+                ctx.arc(dot.x, dot.y, 7.5, 0, Math.PI * 2);
+                ctx.fillStyle = '#60A5FA';
+                ctx.fill();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#3B82F6';
+                ctx.stroke();
+
+                ctx.fillStyle = '#3B82F6';
+                ctx.font = '9px font-mono';
+                ctx.fillText('💳', dot.x - 5, dot.y - 9);
+
+                if (dot.checkoutTimer > 35) {
+                  dot.state = 'leaving';
+                }
+              }
+              else if (dot.state === 'leaving') {
+                const exitX = canvas.width - 20;
+                const exitY = canvas.height + 20;
+
+                dot.x += (exitX - dot.x) * 0.08;
+                dot.y += (exitY - dot.y) * 0.08;
+
+                ctx.beginPath();
+                ctx.arc(dot.x, dot.y, 6.5, 0, Math.PI * 2);
+                ctx.fillStyle = '#34D399';
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = '#10B981';
+                ctx.font = '10px sans-serif';
+                ctx.fillText('😊', dot.x - 5, dot.y - 8);
+
+                if (dot.y > canvas.height - 10) {
+                  dot.state = 'queue';
+                  dot.x = 20;
+                  dot.y = 20;
+                }
+              }
+            });
+
+            requestAnimationFrame(animate);
+          };
+
+          requestAnimationFrame(animate);
+        }
+      }
+    }
+  </script>
+</body>
+</html>
